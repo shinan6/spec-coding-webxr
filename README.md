@@ -13,7 +13,7 @@ A TypeScript + Three.js starter project for a VR driving experience in Chrome wi
 - WebXR-ready renderer for Chrome (`VRButton`)
 - 3-lane driving with smooth lane switching
 - Real forward driving physics (speedometer, acceleration/braking, odometer distance)
-- Incoming traffic spawning with time-varying approach speed
+- Incoming traffic AI with driver profiles, lane changes, overtakes, and reactive braking
 - Infinite looping road tiles/markers (no time-based auto restart)
 - HKU official logo decal on the player car (with local fallback texture)
 - Kilometer celebration burst effect every 1 km

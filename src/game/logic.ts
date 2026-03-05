@@ -1,8 +1,68 @@
+export type TrafficDriverProfile = "slow" | "normal" | "aggressive";
+
+export interface TrafficProfileWeights {
+  slow: number;
+  normal: number;
+  aggressive: number;
+}
+
+interface TrafficProfileConfig {
+  speedMultiplier: number;
+  laneChangeChance: number;
+  overtakeDistance: number;
+  brakeDistance: number;
+  laneChangeCooldown: number;
+  followSpeedFactor: number;
+}
+
+const TRAFFIC_PROFILE_ORDER: TrafficDriverProfile[] = ["slow", "normal", "aggressive"];
+
+const TRAFFIC_PROFILE_CONFIG: Record<TrafficDriverProfile, TrafficProfileConfig> = {
+  slow: {
+    speedMultiplier: 0.85,
+    laneChangeChance: 0.2,
+    overtakeDistance: 6.4,
+    brakeDistance: 10.4,
+    laneChangeCooldown: 2.8,
+    followSpeedFactor: 0.95
+  },
+  normal: {
+    speedMultiplier: 1.0,
+    laneChangeChance: 0.55,
+    overtakeDistance: 7.6,
+    brakeDistance: 9.4,
+    laneChangeCooldown: 2.2,
+    followSpeedFactor: 1.0
+  },
+  aggressive: {
+    speedMultiplier: 1.18,
+    laneChangeChance: 0.88,
+    overtakeDistance: 9.1,
+    brakeDistance: 7.8,
+    laneChangeCooldown: 1.6,
+    followSpeedFactor: 1.08
+  }
+};
+
+export const DEFAULT_TRAFFIC_PROFILE_WEIGHTS: TrafficProfileWeights = {
+  slow: 0.3,
+  normal: 0.5,
+  aggressive: 0.2
+};
+
 export interface TrafficVehicle {
   id: number;
   lane: number;
   z: number;
   speed: number;
+  profile?: TrafficDriverProfile;
+  laneChangeCooldown?: number;
+}
+
+export interface TrafficStepOptions {
+  laneCount?: number;
+  rng?: () => number;
+  safeMergeGap?: number;
 }
 
 export function nextLane(current: number, direction: number, laneCount: number): number {
@@ -30,21 +90,158 @@ export function stepTraffic(
   despawnZ: number,
   playerForwardSpeed = 0,
   elapsedSeconds = 0,
-  speedWaveAmplitude = 0
+  speedWaveAmplitude = 0,
+  options: TrafficStepOptions = {}
 ): TrafficVehicle[] {
+  const laneCount =
+    options.laneCount ?? traffic.reduce((maxLane, vehicle) => Math.max(maxLane, vehicle.lane), 0) + 1;
+  const boundedLaneCount = Math.max(1, laneCount);
+  const rng = options.rng ?? Math.random;
+  const safeMergeGap = Math.max(0.5, options.safeMergeGap ?? 4.8);
+
+  const getProfile = (vehicle: TrafficVehicle): TrafficDriverProfile =>
+    vehicle.profile ?? "normal";
+
+  const getClosestAheadVehicle = (
+    subject: TrafficVehicle,
+    lane: number
+  ): { vehicle: TrafficVehicle; gap: number } | null => {
+    let closest: TrafficVehicle | null = null;
+    let gap = Number.POSITIVE_INFINITY;
+
+    for (const candidate of traffic) {
+      if (candidate.id === subject.id || candidate.lane !== lane || candidate.z >= subject.z) {
+        continue;
+      }
+
+      const candidateGap = subject.z - candidate.z;
+      if (candidateGap < gap) {
+        closest = candidate;
+        gap = candidateGap;
+      }
+    }
+
+    if (!closest) {
+      return null;
+    }
+
+    return { vehicle: closest, gap };
+  };
+
+  const isLaneSafeToMerge = (subject: TrafficVehicle, lane: number): boolean =>
+    traffic.every(
+      (candidate) =>
+        candidate.id === subject.id ||
+        candidate.lane !== lane ||
+        Math.abs(candidate.z - subject.z) > safeMergeGap
+    );
+
+  const chooseOvertakeLane = (
+    subject: TrafficVehicle,
+    currentGap: number
+  ): number => {
+    let bestLane = subject.lane;
+    let bestGap = currentGap;
+
+    for (const direction of [-1, 1]) {
+      const targetLane = subject.lane + direction;
+      if (targetLane < 0 || targetLane >= boundedLaneCount) {
+        continue;
+      }
+
+      if (!isLaneSafeToMerge(subject, targetLane)) {
+        continue;
+      }
+
+      const blocker = getClosestAheadVehicle(subject, targetLane);
+      const targetGap = blocker ? blocker.gap : Number.POSITIVE_INFINITY;
+      if (targetGap > bestGap + 0.8) {
+        bestLane = targetLane;
+        bestGap = targetGap;
+      }
+    }
+
+    return bestLane;
+  };
+
   return traffic
     .map((vehicle) => {
+      const profile = getProfile(vehicle);
+      const profileConfig = TRAFFIC_PROFILE_CONFIG[profile];
+      const lane = Math.min(Math.max(vehicle.lane, 0), boundedLaneCount - 1);
+      let laneChangeCooldown = Math.max(0, (vehicle.laneChangeCooldown ?? 0) - dt);
+
+      let nextLane = lane;
+      const blockerInCurrentLane = getClosestAheadVehicle(vehicle, lane);
+      const currentGap = blockerInCurrentLane?.gap ?? Number.POSITIVE_INFINITY;
+      const wantsOvertake =
+        blockerInCurrentLane !== null &&
+        currentGap <= profileConfig.overtakeDistance &&
+        laneChangeCooldown <= 0 &&
+        rng() <= profileConfig.laneChangeChance;
+
+      if (wantsOvertake) {
+        const targetLane = chooseOvertakeLane(vehicle, currentGap);
+        if (targetLane !== lane) {
+          nextLane = targetLane;
+          laneChangeCooldown = profileConfig.laneChangeCooldown;
+        }
+      }
+
+      let adjustedSpeed = vehicle.speed;
+      const blockerAfterDecision = getClosestAheadVehicle(
+        { ...vehicle, lane: nextLane },
+        nextLane
+      );
+      if (blockerAfterDecision && blockerAfterDecision.gap <= profileConfig.brakeDistance) {
+        const speedCap =
+          blockerAfterDecision.vehicle.speed +
+          Math.max(0, blockerAfterDecision.gap - 1.2) * 0.45;
+        adjustedSpeed = Math.min(
+          adjustedSpeed,
+          Math.max(0.8, speedCap * profileConfig.followSpeedFactor)
+        );
+      }
+
       const wave =
         speedWaveAmplitude === 0
           ? 0
           : Math.sin(elapsedSeconds * 2.4 + vehicle.id * 0.93) * speedWaveAmplitude;
-      const relativeSpeed = Math.max(0.1, vehicle.speed + playerForwardSpeed + wave);
+      const relativeSpeed = Math.max(0.1, adjustedSpeed + playerForwardSpeed + wave);
       return {
         ...vehicle,
+        lane: nextLane,
+        speed: adjustedSpeed,
+        profile,
+        laneChangeCooldown,
         z: vehicle.z - relativeSpeed * dt
       };
     })
     .filter((vehicle) => vehicle.z >= despawnZ);
+}
+
+function pickTrafficProfile(
+  rng: () => number,
+  weights: TrafficProfileWeights
+): TrafficDriverProfile {
+  const normalizedWeights = TRAFFIC_PROFILE_ORDER.map((profile) => ({
+    profile,
+    weight: Math.max(0, weights[profile])
+  }));
+  const totalWeight = normalizedWeights.reduce((sum, entry) => sum + entry.weight, 0);
+  if (totalWeight <= 0) {
+    return "normal";
+  }
+
+  let sample = rng() * totalWeight;
+  for (const entry of normalizedWeights) {
+    sample -= entry.weight;
+    if (sample <= 0) {
+      return entry.profile;
+    }
+  }
+
+  return "normal";
 }
 
 export function spawnTraffic(
@@ -52,17 +249,25 @@ export function spawnTraffic(
   laneCount: number,
   spawnZ: number,
   rng: () => number,
-  speedRange: [number, number]
+  speedRange: [number, number],
+  profileWeights: TrafficProfileWeights = DEFAULT_TRAFFIC_PROFILE_WEIGHTS
 ): TrafficVehicle {
-  const lane = Math.min(laneCount - 1, Math.floor(rng() * laneCount));
+  const lane = Math.min(Math.max(0, laneCount - 1), Math.floor(rng() * laneCount));
   const [minSpeed, maxSpeed] = speedRange;
-  const speed = minSpeed + Math.floor(rng() * (maxSpeed - minSpeed + 1));
+  const baseSpeed = minSpeed + Math.floor(rng() * (maxSpeed - minSpeed + 1));
+  const profile = pickTrafficProfile(rng, profileWeights);
+  const speed = Math.max(
+    1,
+    Number((baseSpeed * TRAFFIC_PROFILE_CONFIG[profile].speedMultiplier).toFixed(2))
+  );
 
   return {
     id,
     lane,
     z: spawnZ,
-    speed
+    speed,
+    profile,
+    laneChangeCooldown: 0
   };
 }
 
@@ -73,7 +278,8 @@ export function createInitialTraffic(
   firstSpawnZ: number,
   spacing: number,
   rng: () => number,
-  speedRange: [number, number]
+  speedRange: [number, number],
+  profileWeights: TrafficProfileWeights = DEFAULT_TRAFFIC_PROFILE_WEIGHTS
 ): TrafficVehicle[] {
   const traffic: TrafficVehicle[] = [];
 
@@ -84,7 +290,8 @@ export function createInitialTraffic(
         laneCount,
         firstSpawnZ + spacing * index,
         rng,
-        speedRange
+        speedRange,
+        profileWeights
       )
     );
   }

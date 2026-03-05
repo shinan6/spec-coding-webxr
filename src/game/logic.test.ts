@@ -32,13 +32,13 @@ describe("stepTraffic", () => {
 
     const result = stepTraffic(traffic, 1, -10);
 
-    expect(result).toEqual([{ id: 1, lane: 0, z: 12, speed: 8 }]);
+    expect(result).toMatchObject([{ id: 1, lane: 0, z: 12, speed: 8 }]);
   });
 
   it("accounts for player forward speed in relative traffic movement", () => {
     const traffic: TrafficVehicle[] = [{ id: 1, lane: 0, z: 20, speed: 8 }];
     const result = stepTraffic(traffic, 1, -10, 6);
-    expect(result).toEqual([{ id: 1, lane: 0, z: 6, speed: 8 }]);
+    expect(result).toMatchObject([{ id: 1, lane: 0, z: 6, speed: 8 }]);
   });
 
   it("supports wave-based speed variation for incoming vehicles", () => {
@@ -47,11 +47,43 @@ describe("stepTraffic", () => {
     const atT1 = stepTraffic(traffic, 1, -100, 0, 1, 2)[0]?.z ?? 0;
     expect(atT0).not.toBeCloseTo(atT1);
   });
+
+  it("changes lane to overtake when blocked and a safe lane exists", () => {
+    const traffic: TrafficVehicle[] = [
+      { id: 1, lane: 1, z: 32, speed: 11, profile: "aggressive", laneChangeCooldown: 0 },
+      { id: 2, lane: 1, z: 26, speed: 5, profile: "slow", laneChangeCooldown: 0 },
+      { id: 3, lane: 2, z: 31, speed: 7, profile: "normal", laneChangeCooldown: 0 }
+    ];
+
+    const result = stepTraffic(traffic, 1, -100, 0, 0, 0, {
+      laneCount: 3,
+      rng: () => 0
+    });
+
+    const follower = result.find((vehicle) => vehicle.id === 1);
+    expect(follower?.lane).toBe(0);
+  });
+
+  it("brakes when blocked and no safe lane change is available", () => {
+    const traffic: TrafficVehicle[] = [
+      { id: 1, lane: 0, z: 30, speed: 12, profile: "normal", laneChangeCooldown: 0 },
+      { id: 2, lane: 0, z: 25, speed: 4, profile: "slow", laneChangeCooldown: 0 }
+    ];
+
+    const result = stepTraffic(traffic, 1, -100, 0, 0, 0, {
+      laneCount: 1,
+      rng: () => 0
+    });
+
+    const follower = result.find((vehicle) => vehicle.id === 1);
+    expect(follower?.lane).toBe(0);
+    expect(follower?.z ?? 0).toBeGreaterThan(18);
+  });
 });
 
 describe("spawnTraffic", () => {
   it("spawns a vehicle in a deterministic lane and speed from rng", () => {
-    const rngValues = [0.92, 0.25];
+    const rngValues = [0.92, 0.25, 0.5];
     const rng = () => {
       const value = rngValues.shift();
       if (value === undefined) {
@@ -62,13 +94,32 @@ describe("spawnTraffic", () => {
 
     const vehicle = spawnTraffic(4, 3, 40, rng, [6, 10]);
 
-    expect(vehicle).toEqual({ id: 4, lane: 2, z: 40, speed: 7 });
+    expect(vehicle).toMatchObject({ id: 4, lane: 2, z: 40, speed: 7 });
+  });
+
+  it("supports weighted driver profiles", () => {
+    const rngValues = [0.3, 0.1, 0.9];
+    const rng = () => {
+      const value = rngValues.shift();
+      if (value === undefined) {
+        throw new Error("No RNG values left");
+      }
+      return value;
+    };
+
+    const vehicle = spawnTraffic(5, 3, 42, rng, [8, 12], {
+      slow: 0,
+      normal: 0,
+      aggressive: 1
+    });
+
+    expect(vehicle.profile).toBe("aggressive");
   });
 });
 
 describe("createInitialTraffic", () => {
   it("creates sequential ids with forward spaced z positions", () => {
-    const rngValues = [0.1, 0.2, 0.6, 0.4, 0.9, 0.8];
+    const rngValues = [0.1, 0.2, 0.5, 0.6, 0.4, 0.5, 0.9, 0.8, 0.5];
     const rng = () => {
       const value = rngValues.shift();
       if (value === undefined) {
