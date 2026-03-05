@@ -35,12 +35,12 @@ const TRAFFIC_PROFILE_CONFIG: Record<TrafficDriverProfile, TrafficProfileConfig>
     followSpeedFactor: 1.0
   },
   aggressive: {
-    speedMultiplier: 1.18,
-    laneChangeChance: 0.88,
-    overtakeDistance: 9.1,
-    brakeDistance: 7.8,
-    laneChangeCooldown: 1.6,
-    followSpeedFactor: 1.08
+    speedMultiplier: 1.28,
+    laneChangeChance: 0.95,
+    overtakeDistance: 10.6,
+    brakeDistance: 6.5,
+    laneChangeCooldown: 1.1,
+    followSpeedFactor: 1.14
   }
 };
 
