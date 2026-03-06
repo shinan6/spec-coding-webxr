@@ -1,6 +1,7 @@
 import {
   advanceLoopingZ,
   applyMouseLookDelta,
+  canSpawnTrafficInLane,
   createInitialTraffic,
   evaluateDistanceEvents,
   hasCollision,
@@ -64,6 +65,13 @@ describe("stepTraffic", () => {
     expect(follower?.lane).toBe(0);
   });
 
+  it("applies optional scenario speed multipliers without changing defaults", () => {
+    const traffic: TrafficVehicle[] = [{ id: 9, lane: 0, z: 20, speed: 10 }];
+    const result = stepTraffic(traffic, 1, -10, 0, 0, 0, { speedMultiplier: 0.5 });
+
+    expect(result).toMatchObject([{ id: 9, lane: 0, z: 15, speed: 10 }]);
+  });
+
   it("brakes when blocked and no safe lane change is available", () => {
     const traffic: TrafficVehicle[] = [
       { id: 1, lane: 0, z: 30, speed: 12, profile: "normal", laneChangeCooldown: 0 },
@@ -108,12 +116,36 @@ describe("spawnTraffic", () => {
     };
 
     const vehicle = spawnTraffic(5, 3, 42, rng, [8, 12], {
-      slow: 0,
-      normal: 0,
-      aggressive: 1
+      profileWeights: {
+        slow: 0,
+        normal: 0,
+        aggressive: 1
+      }
     });
 
     expect(vehicle.profile).toBe("aggressive");
+  });
+
+  it("supports weighted lane selection for scenario pressure", () => {
+    const rngValues = [0.74, 0.25, 0.5];
+    const rng = () => {
+      const value = rngValues.shift();
+      if (value === undefined) {
+        throw new Error("No RNG values left");
+      }
+      return value;
+    };
+
+    const vehicle = spawnTraffic(10, 3, 48, rng, [6, 10], {
+      laneWeights: [0.1, 0.1, 0.8],
+      profileWeights: {
+        slow: 0,
+        normal: 1,
+        aggressive: 0
+      }
+    });
+
+    expect(vehicle).toMatchObject({ id: 10, lane: 2, z: 48, speed: 7, profile: "normal" });
   });
 });
 
@@ -243,5 +275,24 @@ describe("evaluateDistanceEvents", () => {
     const events = evaluateDistanceEvents(2100, 2899, 10);
     expect(events.crossedKilometers).toEqual([]);
     expect(events.reachedWin).toBe(false);
+  });
+});
+
+describe("canSpawnTrafficInLane", () => {
+  it("keeps default spawn gap checks when no scenario overrides are provided", () => {
+    const traffic: TrafficVehicle[] = [{ id: 1, lane: 1, z: 30, speed: 8 }];
+    expect(canSpawnTrafficInLane(traffic, 1, 28)).toBe(false);
+  });
+
+  it("allows tighter gaps on pressured lanes when overrides are present", () => {
+    const traffic: TrafficVehicle[] = [{ id: 1, lane: 1, z: 30, speed: 8 }];
+
+    expect(
+      canSpawnTrafficInLane(traffic, 1, 28, {
+        laneGapScale: {
+          1: 0.75
+        }
+      })
+    ).toBe(true);
   });
 });

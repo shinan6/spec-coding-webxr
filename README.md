@@ -15,11 +15,14 @@ A TypeScript + Three.js starter project for a VR driving experience in Chrome wi
 - Real forward driving physics (speedometer, acceleration/braking, odometer distance)
 - Incoming traffic AI with driver profiles, lane changes, overtakes, and reactive braking
 - Infinite looping road tiles/markers (no time-based auto restart)
+- Seeded procedural road scenarios with weighted straights, curves, and elevation changes
+- Weather/time-of-day modifiers (`clear`, `light_rain`, `fog`, `day`, `dusk`, `night`)
+- Event zones for `construction_narrow_lane` and `traffic_bottleneck`
 - HKU official logo decal on the player car (with local fallback texture)
 - Kilometer celebration burst effect every 1 km
 - Win/Lose end-state overlays (`You win!` at 10 km, `You lose!` on crash)
 - Collision detection + restart flow
-- Pure game logic module with tests (`src/game/logic.ts`)
+- Pure game logic + procedural generation modules with tests (`src/game/logic.ts`, `src/game/procedural.ts`)
 
 ## Run locally
 
@@ -44,6 +47,13 @@ The importer uses open-license Khronos sample models with per-model license note
 - Restart after crash: `R`
 - Visual forward motion is shown by road flow and wheel spin
 - Crash now shows a boom flash/ring/particles effect
+
+## Procedural mode
+
+- Procedural mode is enabled by default.
+- Use `?seed=<value>` to replay the same road/weather/event sequence.
+- Use `?procedural=0` to fall back to the original straight-road mode.
+- The HUD now shows the active seed, modifier set, segment type, and live event zone.
 
 ## Build and test
 
