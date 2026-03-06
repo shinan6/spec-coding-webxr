@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 import {
+  DEFAULT_TRAFFIC_PROFILE_WEIGHTS,
   advanceLoopingZ,
   applyMouseLookDelta,
   createInitialTraffic,
@@ -95,6 +96,7 @@ const laneCount = 3;
 const roadWidth = 10;
 const laneWidth = 2.5;
 const trafficSpeedRange: [number, number] = [9, 16];
+const trafficProfileWeights = DEFAULT_TRAFFIC_PROFILE_WEIGHTS;
 const trafficSpeedWaveAmplitude = 2.4;
 const initialTrafficCount = 3;
 const initialTrafficFirstZ = 24;
@@ -390,7 +392,8 @@ const buildInitialTraffic = (): TrafficVehicle[] =>
     initialTrafficFirstZ,
     initialTrafficSpacing,
     Math.random,
-    trafficSpeedRange
+    trafficSpeedRange,
+    trafficProfileWeights
   );
 
 let traffic: TrafficVehicle[] = buildInitialTraffic();
@@ -472,7 +475,13 @@ const rebuildTrafficMeshes = (): void => {
       trafficMeshes.set(vehicle.id, mesh);
     }
 
-    mesh.position.x = laneToX(vehicle.lane, laneCount, laneWidth);
+    const laneTargetX = laneToX(vehicle.lane, laneCount, laneWidth);
+    if (mesh.userData.hasInitializedLanePosition) {
+      mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, laneTargetX, 0.18);
+    } else {
+      mesh.position.x = laneTargetX;
+      mesh.userData.hasInitializedLanePosition = true;
+    }
     mesh.position.y = 0;
     mesh.position.z = vehicle.z;
   }
@@ -789,7 +798,14 @@ renderer.setAnimationLoop(() => {
 
       if (spawnTimer <= 0) {
         spawnTimer = THREE.MathUtils.randFloat(0.85, 1.35);
-        const vehicle = spawnTraffic(nextTrafficId, laneCount, 62, Math.random, trafficSpeedRange);
+        const vehicle = spawnTraffic(
+          nextTrafficId,
+          laneCount,
+          62,
+          Math.random,
+          trafficSpeedRange,
+          trafficProfileWeights
+        );
         const laneIsTooBusy = traffic.some(
           (existing) => existing.lane === vehicle.lane && existing.z > 34
         );
@@ -806,7 +822,11 @@ renderer.setAnimationLoop(() => {
         -22,
         playerSpeed,
         raceElapsedSeconds,
-        trafficSpeedWaveAmplitude
+        trafficSpeedWaveAmplitude,
+        {
+          laneCount,
+          rng: Math.random
+        }
       );
       const wasCrashed = crashed;
       crashed = hasCollision(playerLane, 0, traffic, 0.1, 1.9);
