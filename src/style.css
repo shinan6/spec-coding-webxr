@@ -53,6 +53,14 @@ canvas {
   color: #ffd885;
 }
 
+.scenario {
+  margin: 0.3rem 0 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #c4ddff;
+}
+
 .controls {
   margin: 0.45rem 0 0;
   font-size: 0.86rem;

@@ -63,6 +63,16 @@ export interface TrafficStepOptions {
   laneCount?: number;
   rng?: () => number;
   safeMergeGap?: number;
+  speedMultiplier?: number;
+}
+
+export interface TrafficSpawnOptions {
+  laneWeights?: number[];
+  profileWeights?: TrafficProfileWeights;
+}
+
+export interface TrafficSpawnConstraintOptions {
+  laneGapScale?: Partial<Record<number, number>>;
 }
 
 export function nextLane(current: number, direction: number, laneCount: number): number {
@@ -207,7 +217,11 @@ export function stepTraffic(
         speedWaveAmplitude === 0
           ? 0
           : Math.sin(elapsedSeconds * 2.4 + vehicle.id * 0.93) * speedWaveAmplitude;
-      const relativeSpeed = Math.max(0.1, adjustedSpeed + playerForwardSpeed + wave);
+      const speedMultiplier = Math.max(0.1, options.speedMultiplier ?? 1);
+      const relativeSpeed = Math.max(
+        0.1,
+        (adjustedSpeed + playerForwardSpeed + wave) * speedMultiplier
+      );
       return {
         ...vehicle,
         lane: nextLane,
@@ -244,17 +258,43 @@ function pickTrafficProfile(
   return "normal";
 }
 
+function selectTrafficLane(laneCount: number, rng: () => number, laneWeights?: number[]): number {
+  if (laneCount <= 0) {
+    return 0;
+  }
+
+  const weights = Array.from({ length: laneCount }, (_, lane) =>
+    Math.max(0, laneWeights?.[lane] ?? 1)
+  );
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+
+  if (totalWeight <= 0) {
+    return Math.min(laneCount - 1, Math.floor(rng() * laneCount));
+  }
+
+  let threshold = rng() * totalWeight;
+  for (let lane = 0; lane < weights.length; lane += 1) {
+    threshold -= weights[lane] ?? 0;
+    if (threshold <= 0) {
+      return lane;
+    }
+  }
+
+  return laneCount - 1;
+}
+
 export function spawnTraffic(
   id: number,
   laneCount: number,
   spawnZ: number,
   rng: () => number,
   speedRange: [number, number],
-  profileWeights: TrafficProfileWeights = DEFAULT_TRAFFIC_PROFILE_WEIGHTS
+  options: TrafficSpawnOptions = {}
 ): TrafficVehicle {
-  const lane = Math.min(Math.max(0, laneCount - 1), Math.floor(rng() * laneCount));
+  const lane = selectTrafficLane(laneCount, rng, options.laneWeights);
   const [minSpeed, maxSpeed] = speedRange;
   const baseSpeed = minSpeed + Math.floor(rng() * (maxSpeed - minSpeed + 1));
+  const profileWeights = options.profileWeights ?? DEFAULT_TRAFFIC_PROFILE_WEIGHTS;
   const profile = pickTrafficProfile(rng, profileWeights);
   const speed = Math.max(
     1,
@@ -291,12 +331,24 @@ export function createInitialTraffic(
         firstSpawnZ + spacing * index,
         rng,
         speedRange,
-        profileWeights
+        { profileWeights }
       )
     );
   }
 
   return traffic;
+}
+
+export function canSpawnTrafficInLane(
+  traffic: TrafficVehicle[],
+  lane: number,
+  minGapAheadZ: number,
+  options: TrafficSpawnConstraintOptions = {}
+): boolean {
+  const gapScale = Math.max(0.1, options.laneGapScale?.[lane] ?? 1);
+  const effectiveMinGap = minGapAheadZ / gapScale;
+
+  return traffic.every((vehicle) => vehicle.lane !== lane || vehicle.z <= effectiveMinGap);
 }
 
 export function mapSteerDirectionForMirroredView(
